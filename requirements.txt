@@ -1,3 +1,5 @@
 discord.py
 flask
 flask-cors
+Pillow
+requests
