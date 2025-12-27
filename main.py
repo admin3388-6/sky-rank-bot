@@ -1,7 +1,6 @@
 import discord
 import os
 import io
-import asyncio
 import requests
 from discord.ext import commands
 from flask import Flask, jsonify, request
@@ -10,148 +9,118 @@ from threading import Thread
 from PIL import Image, ImageDraw, ImageOps
 from datetime import timedelta
 
-# --- الإعدادات الفنية ---
+# --- الإعدادات ---
 token = os.getenv('DISCORD_TOKEN')
-WELCOME_IMAGE_URL = "https://i.ibb.co/mVYpF4RQ/Picsart-25-12-24-14-57-39-769.jpg"
 IP_CHANNEL_ID = 1448805638686769213
 
-intents = discord.Intents.default()
-intents.members = True 
-intents.message_content = True 
+intents = discord.Intents.all() # تفعيل جميع الحواس لضمان دقة الاستجابة
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app) # حل مشكلة عدم الاستجابة (CORS)
 
-# قاعدة بيانات مؤقتة (تُدار من لوحة التحكم)
-bot_config = {
-    "welcome_channel": None,
+# إعدادات ديناميكية
+config = {
+    "welcome_ch": None,
+    "welcome_bg": "https://i.ibb.co/mVYpF4RQ/Picsart-25-12-24-14-57-39-769.jpg",
     "anti_spam": True,
-    "smart_reply": True,
-    "ip_response": "sd2k.progamer.me"
+    "smart_reply": True
 }
 
-# --- نظام الرد الذكي (عينة من القاموس الضخم) ---
-# ملاحظة: يمكنك توسيع هذه القائمة لتصل لـ 500 كلمة كما طلبت
-SMART_DICTIONARY = {
-    "سلام": "وعليكم السلام ورحمة الله وبركاته، نورتنا يا غالي!",
-    "كيفك": "بخير عساك بخير، أنت كيف حالك؟",
-    "شخباركم": "تمام التمام، نورت السيرفر بطلتك",
-    "صباح الخير": "يسعد صباحك بكل خير وبركة",
-    "منور": "النور نورك يا بعد قلبي",
-    "شكرا": "العفو، هذا واجبنا يا طيب",
-    "اي بي": f"تفضل الأي بي يا وحش: sd2k.progamer.me",
-    "ip": f"Server IP: sd2k.progamer.me",
-    "مساعدة": "أبشر، اذكر مشكلتك وسيقوم الفريق بالرد عليك فوراً",
+# قاموس الرد الذكي الموسع (نموذج قابل للزيادة)
+SMART_REPLIES = {
+    "سلام": "وعليكم السلام يا هلا بك نورتنا!",
+    "اي بي": "تفضل الأي بي يا وحش: `sd2k.progamer.me`",
+    "ip": "Server IP: `sd2k.progamer.me`",
+    "كيفكم": "بخير عساك بخير، نورت السيرفر",
+    "وش السالفة": "سيرفرنا مخصص للألعاب والبرمجة، خذ لك لفة في القوانين"
 }
 
-# --- نظام مكافحة السبام والرسائل المكررة ---
-user_messages = {}
+# --- نظام الحماية ---
+user_logs = {}
 
-async def anti_spam_check(message):
-    if not bot_config["anti_spam"] or message.author.bot: return False
-    
-    user_id = message.author.id
-    current_time = message.created_at
-    
-    if user_id not in user_messages:
-        user_messages[user_id] = []
-    
-    # إضافة الرسالة الحالية للسجل
-    user_messages[user_id].append({"time": current_time, "content": message.content})
-    # الاحتفاظ بآخر 5 رسائل فقط
-    user_messages[user_id] = user_messages[user_id][-5:]
-    
-    msgs = user_messages[user_id]
-    if len(msgs) >= 4:
-        # 1. منع التكرار (نفس الكلمة 3 مرات)
-        if msgs[-1]['content'] == msgs[-2]['content'] == msgs[-3]['content']:
-            return True
-        # 2. منع السرعة (4 رسائل في أقل من 5 ثواني)
-        time_diff = (msgs[-1]['time'] - msgs[0]['time']).total_seconds()
-        if time_diff < 5:
-            return True
-    return False
-
-# --- أحداث البوت ---
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} | Efficiency Mode: ON")
+    print(f"✅ {bot.user} Online | High Performance Mode")
 
 @bot.event
 async def on_message(message):
     if message.author.bot: return
 
-    # نظام مكافحة السبام في القناة المخصصة
-    if message.channel.id == IP_CHANNEL_ID:
-        is_spam = await anti_spam_check(message)
-        if is_spam:
+    # نظام مكافحة السبام المتطور
+    if message.channel.id == IP_CHANNEL_ID and config["anti_spam"]:
+        uid = message.author.id
+        now = message.created_at
+        
+        if uid not in user_logs: user_logs[uid] = []
+        user_logs[uid].append(message)
+        
+        # كشف التكرار والسرعة
+        history = [m for m in user_logs[uid] if (now - m.created_at).total_seconds() < 10]
+        if len(history) > 4 or (len(history) > 2 and history[-1].content == history[-2].content):
             await message.delete()
             try:
                 await message.author.timeout(timedelta(minutes=5), reason="Spamming")
-                await message.channel.send(f"⚠️ {message.author.mention} تم إعطاؤك وقت مستقطع (5 دقائق) بسبب التكرار أو السبام.", delete_after=10)
+                await message.channel.send(f"⚠️ {message.author.mention} اهدأ قليلاً! تم إعطاؤك تايم آوت 5 دقائق.", delete_after=5)
             except: pass
             return
 
-        # نظام الرد الذكي والأي بي
-        if bot_config["smart_reply"]:
-            content = message.content.lower()
-            for key, reply in SMART_DICTIONARY.items():
-                if key in content:
-                    await message.reply(reply)
-                    break
+    # الرد الذكي
+    if config["smart_reply"] and message.channel.id == IP_CHANNEL_ID:
+        for key, val in SMART_REPLIES.items():
+            if key in message.content.lower():
+                await message.reply(val)
+                break
 
     await bot.process_commands(message)
 
 @bot.event
 async def on_member_join(member):
-    if not bot_config["welcome_channel"]: return
-    channel = bot.get_channel(int(bot_config["welcome_channel"]))
+    if not config["welcome_ch"]: return
+    channel = bot.get_channel(int(config["welcome_ch"]))
     try:
-        # معالجة الصورة الأصلية بدقة 1408x736
-        bg_res = requests.get(WELCOME_IMAGE_URL)
-        bg = Image.open(io.BytesIO(bg_res.content)).convert("RGBA")
+        res = requests.get(config["welcome_bg"])
+        bg = Image.open(io.BytesIO(res.content)).convert("RGBA")
         pfp_res = requests.get(member.display_avatar.url)
-        pfp = Image.open(io.BytesIO(pfp_res.content)).convert("RGBA")
+        pfp = Image.open(io.BytesIO(pfp_res.content)).convert("RGBA").resize((271, 271), Image.LANCZOS)
         
-        # حجم البروفايل المحسوب مسبقاً (271x271)
-        pfp = pfp.resize((271, 271), Image.LANCZOS)
         mask = Image.new('L', (271, 271), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, 271, 271), fill=255)
+        ImageDraw.Draw(mask).ellipse((0, 0, 271, 271), fill=255)
         pfp.putalpha(mask)
-
-        # الإحداثيات الذهبية (627, 196)
-        bg.paste(pfp, (627, 196), pfp)
+        bg.paste(pfp, (627, 196), pfp) # نفس إحداثياتك الدقيقة
         
         with io.BytesIO() as out:
             bg.save(out, format="PNG")
             out.seek(0)
-            await channel.send(f"نورت السيرفر يا {member.mention}! أنت العضو رقم **{member.guild.member_count}**", file=discord.File(out, "welcome.png"))
-    except Exception as e: print(f"Welcome Error: {e}")
+            await channel.send(f"حياك الله {member.mention} في سيرفرنا!", file=discord.File(out, "welcome.png"))
+    except Exception as e: print(f"Error Welcome: {e}")
 
-# --- واجهة الـ API للوحة التحكم ---
-@app.route('/update_config', methods=['POST'])
-def update_config():
-    bot_config.update(request.json)
-    return jsonify({"status": "success"})
+# --- API لوحة التحكم ---
+@app.route('/api/status')
+def get_status():
+    guild = bot.guilds[0] if bot.guilds else None
+    return jsonify({
+        "members": guild.member_count if guild else 0,
+        "channels": [{"id": str(c.id), "name": c.name} for g in bot.guilds for c in g.text_channels],
+        "current_bg": config["welcome_bg"]
+    })
 
-@app.route('/send_advanced', methods=['POST'])
-def send_adv():
+@app.route('/api/update', methods=['POST'])
+def update():
+    config.update(request.json)
+    return jsonify({"status": "ok"})
+
+@app.route('/api/send', methods=['POST'])
+def send():
     data = request.json
     channel = bot.get_channel(int(data['channel_id']))
-    if data.get('type') == 'embed':
+    if data['type'] == 'embed':
         embed = discord.Embed(title=data['title'], description=data['desc'], color=int(data['color'].lstrip('#'), 16))
-        if data.get('footer'): embed.set_footer(text=data['footer'])
         bot.loop.create_task(channel.send(embed=embed))
     else:
         bot.loop.create_task(channel.send(data['content']))
-    return jsonify({"status": "success"})
+    return jsonify({"status": "ok"})
 
-@app.route('/get_status')
-def get_status():
-    return jsonify({"channels": [{"id": str(c.id), "name": c.name} for g in bot.guilds for c in g.text_channels]})
-
-def run_web(): app.run(host='0.0.0.0', port=8080)
-Thread(target=run_web).start()
+def run(): app.run(host='0.0.0.0', port=8080)
+Thread(target=run).start()
 bot.run(token)
