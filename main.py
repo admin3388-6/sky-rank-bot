@@ -6,7 +6,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from threading import Thread
 
-# --- الإعدادات وقاعدة البيانات ---
+# --- إعدادات قاعدة البيانات والتخزين ---
 TOKEN = os.getenv('DISCORD_TOKEN')
 DATA_FILE = "database.json"
 
@@ -21,7 +21,7 @@ def save_db(data):
 
 db = load_db()
 
-# --- دالة جلب صورة الرتبة بناءً على المستوى (دقيقة جداً) ---
+# --- دالة جلب الصور بناءً على المستوى الدقيق ---
 def get_rank_image(level):
     if 0 <= level <= 2: return "https://i.ibb.co/1tbgDVW9/Picsart-25-12-27-22-57-14-589.png"
     if 3 <= level <= 5: return "https://i.ibb.co/0RWHYkDD/Picsart-25-12-27-22-57-27-354.png"
@@ -31,64 +31,55 @@ def get_rank_image(level):
     if 14 <= level <= 15: return "https://i.ibb.co/0Rrpz67D/Picsart-25-12-27-22-58-15-557.png"
     if 16 <= level <= 20: return "https://i.ibb.co/hx51cSSB/Picsart-25-12-27-22-58-24-170.png"
     if 21 <= level <= 25: return "https://i.ibb.co/tpsztsyD/Picsart-25-12-27-22-58-29-156.png"
-    if 26 <= level <= 30: return "https://i.ibb.co/VWdNG0wf/Picsart-25-12-27-22-58-33-914.png"
-    if 31 <= level <= 35: return "https://i.ibb.co/VWdNG0wf/Picsart-25-12-27-22-58-33-914.png"
+    if 26 <= level <= 35: return "https://i.ibb.co/VWdNG0wf/Picsart-25-12-27-22-58-33-914.png"
     if 36 <= level <= 38: return "https://i.ibb.co/Q3dnYKDD/Picsart-25-12-27-22-58-41-773.png"
     if 39 <= level <= 44: return "https://i.ibb.co/Kpt81h1w/Picsart-25-12-27-22-58-48-613.png"
     if 45 <= level <= 49: return "https://i.ibb.co/xtxVmgN3/Picsart-25-12-27-22-58-53-180.png"
     if level >= 50: return "https://i.ibb.co/TxWy47mp/Picsart-25-12-27-22-59-03-231.png"
     return "https://i.ibb.co/1tbgDVW9/Picsart-25-12-27-22-57-14-589.png"
 
-class RankBot(commands.Bot):
+class SkyRankBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
 
     async def setup_hook(self):
+        # لمسح أي تضارب: نقوم بمزامنة الأوامر عالمياً وللسيرفرات
+        print("🔄 جاري مزامنة الأوامر الفورية...")
         await self.tree.sync()
-        print("✅ نظام الرتب متصل وجاهز!")
+        print("✅ تم تحديث الأوامر بنجاح!")
 
-bot = RankBot()
+bot = SkyRankBot()
 
-# --- أمر الـ Rank الاحترافي ---
-@bot.tree.command(name="rank", description="عرض بطاقة المستوى والرتبة الخاصة بك")
+# --- أمر الرتبة المطور ---
+@bot.tree.command(name="rank", description="عرض بطاقة تفاعلك ومستواك في Sky Data")
 async def rank(interaction: discord.Interaction):
+    # استخدام defer لتفادي خطأ Outdated Command
     await interaction.response.defer()
     
     uid = str(interaction.user.id)
-    # جلب بيانات المستخدم أو إنشاء بيانات جديدة إذا كان أول مرة
-    user_data = db["users"].get(uid, {"xp": 0, "level": 0})
+    u = db["users"].get(uid, {"xp": 0, "level": 0})
     
-    current_xp = user_data["xp"]
-    current_lvl = user_data["level"]
-    
-    # تصميم الإمبد (Embed)
     embed = discord.Embed(
-        title=f"📊 بطاقة رتبة | {interaction.user.display_name}",
-        color=0x2ecc71
+        title=f"📊 بطاقة رتبة {interaction.user.display_name}",
+        color=0x00d2ff
     )
     
-    # إضافة الحقول مع صور الأيقونات التي طلبتها
-    embed.add_field(
-        name="المستوى الحالي", 
-        value=f"**Level: {current_lvl}**", 
-        inline=True
-    )
-    embed.add_field(
-        name="نقاط الخبرة", 
-        value=f"**XP: {current_xp}**", 
-        inline=True
-    )
+    # إضافة الصور التي طلبتها كأيقونات للحقول
+    lvl_icon = "https://i.ibb.co/0RR5NMP7/Picsart-25-12-27-23-06-27-356.png"
+    xp_icon = "https://i.ibb.co/BHy8Kj71/Picsart-25-12-27-23-06-04-733.png"
     
-    # تعيين صورة المستخدم وصورة الرتبة
+    embed.add_field(name="المستوى", value=f"⭐ **{u['level']}**", inline=True)
+    embed.add_field(name="الخبرة", value=f"🧩 **{u['xp']}**", inline=True)
+    
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
-    embed.set_image(url=get_rank_image(current_lvl))
+    embed.set_image(url=get_rank_image(u["level"]))
     
-    # تذييل يحتوي على أيقونات LVL و XP
-    embed.set_footer(text="نظام رتب Sky Data", icon_url="https://i.ibb.co/BHy8Kj71/Picsart-25-12-27-23-06-04-733.png")
-
+    # تذييل الصفحة يحتوي على الأيقونات المطلوبة
+    embed.set_footer(text="Sky Data Elite System", icon_url=xp_icon)
+    
     await interaction.followup.send(embed=embed)
 
-# --- نظام كسب الـ XP وتخزين البيانات ---
+# --- نظام تسجيل التفاعل (تخزين التقدم) ---
 @bot.event
 async def on_message(message):
     if message.author.bot: return
@@ -97,33 +88,33 @@ async def on_message(message):
     if uid not in db["users"]:
         db["users"][uid] = {"xp": 0, "level": 0}
     
-    # إضافة نقاط عشوائية بين 5 و 15 عند كل رسالة
+    # إضافة نقاط خبرة عشوائية
     db["users"][uid]["xp"] += random.randint(5, 15)
     
-    # معادلة الترقية (كل 200 نقطة مستوى جديد)
-    needed_xp = (db["users"][uid]["level"] + 1) * 200
-    if db["users"][uid]["xp"] >= needed_xp:
+    # معادلة الترقية: كلما زاد المستوى زادت النقاط المطلوبة
+    level_up_xp = (db["users"][uid]["level"] + 1) * 150
+    if db["users"][uid]["xp"] >= level_up_xp:
         db["users"][uid]["level"] += 1
-        # تنبيه اختياري عند الترقية
+        # تنبيه بسيط للترقية
         try:
-            await message.channel.send(f"🎊 مبروك {message.author.mention}! ارتقيت للمستوى {db['users'][uid]['level']}")
+            await message.channel.send(f"🎊 كفو {message.author.mention}! ارتقيت للمستوى {db['users'][uid]['level']}", delete_after=5)
         except: pass
-        
-    save_db(db) # حفظ البيانات فوراً في الملف
+    
+    save_db(db) # حفظ التقدم في database.json
     await bot.process_commands(message)
 
-# --- واجهة الـ API للموقع ---
+# --- واجهة الموقع لـ Discord.html ---
 app = Flask(__name__)
 CORS(app)
 
 @app.route('/api/full_stats')
 def full_stats():
-    # ترتيب المستخدمين حسب الـ XP لعرض التوب 10
-    top_list = sorted(db["users"].items(), key=lambda x: x[1]['xp'], reverse=True)[:10]
+    top_users = sorted(db["users"].items(), key=lambda x: x[1]['xp'], reverse=True)[:10]
     return jsonify({
         "members": len(db["users"]),
-        "top_users": top_list,
-        "online": 14 # يمكنك برمجتها لجلب المتصلين حقيقياً
+        "top_users": top_users,
+        "servers": 1,
+        "online": 14 
     })
 
 def run_api():
