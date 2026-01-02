@@ -5,7 +5,7 @@ import os, random, asyncio, requests
 from flask import Flask
 from threading import Thread
 from pymongo import MongoClient
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from io import BytesIO
 from datetime import datetime, timedelta
 
@@ -17,15 +17,19 @@ cluster = MongoClient(MONGO_URL)
 db = cluster["SkyData"]
 collection = db["rank_system"]
 
-# إعدادات القنوات والرتب
+# قنوات التنبيه والرتب
 UPGRADE_CH_ID = 1448638848803405852
 ALLOWED_RANK_CH_ID = 1448805638686769213
 OWNER_ID = 1429183440485486679 
 ADMIN_ROLES = [1448639184532144128, 1448638848098631881, 1448638848090509381]
 
+# نظام الرتب التلقائي (مستوى : آيدي الرتبة)
 LEVEL_ROLES = {
-    10: 1448821273756172348, 20: 1448821177605947402,
-    30: 1448821103391674398, 40: 1448821022462709891, 50: 1448820918490239027
+    10: 1448821273756172348, 
+    20: 1448821177605947402,
+    30: 1448821103391674398, 
+    40: 1448821022462709891, 
+    50: 1448820918490239027
 }
 
 # --- 2. متجر الخلفيات الكامل ---
@@ -45,7 +49,7 @@ STORE_BG = {
 DEFAULT_BG = "https://i.ibb.co/4nXX8y2z/fc17d0243302d37f7759059464e4404a.jpg"
 xp_cooldown = {}
 
-# --- 3. الدوال المساعدة ---
+# --- 3. الدوال المساعدة ونظام الرسم ---
 def format_num(n):
     if n >= 1e6: return f"{n/1e6:.1f}M"
     if n >= 1e3: return f"{n/1e3:.1f}K"
@@ -58,39 +62,44 @@ def get_user(uid):
         collection.insert_one(u)
     return u
 
-# --- دالة الرسم مع حل مشكلة الخط (تكرار الرسم للوضوح) ---
 async def generate_card(name, level, xp, avatar_url, bg_url, text_color):
     try:
+        # تحميل الموارد
         bg_res = requests.get(bg_url, timeout=10)
         img = Image.open(BytesIO(bg_res.content)).convert("RGBA").resize((900, 300))
         
         av_res = requests.get(avatar_url, timeout=10)
-        av = Image.open(BytesIO(av_res.content)).convert("RGBA").resize((180, 180))
+        av = Image.open(BytesIO(av_res.content)).convert("RGBA").resize((200, 200))
         
-        mask = Image.new("L", (180, 180), 0)
-        ImageDraw.Draw(mask).ellipse((0, 0, 180, 180), fill=255)
-        img.paste(av, (50, 60), mask)
+        # قناع دائري للأفاتار
+        mask = Image.new("L", (200, 200), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, 200, 200), fill=255)
+        img.paste(av, (40, 50), mask)
         
-        draw = ImageDraw.Draw(img)
+        # طبقة النص لضمان أعلى جودة ومنع التشويش
+        txt_layer = Image.new("RGBA", (900, 300), (0,0,0,0))
+        draw = ImageDraw.Draw(txt_layer)
         
-        # دالة لرسم نص عريض جداً وواضح بدون ملفات خط خارجية
-        def draw_huge_text(pos, text, color):
+        # دالة الرسم العملاق (أكبر بـ 60% مع تنعيم)
+        def draw_massive_text(pos, text, color):
             x, y = pos
             outline = "black" if color != "black" else "white"
-            # رسم الحواف (Stroke) بتكرار 5 طبقات للوضوح
-            for i in range(-2, 3):
-                for j in range(-2, 3):
+            # رسم حدود النص (Stroke) لزيادة الوضوح
+            for i in range(-4, 5):
+                for j in range(-4, 5):
                     draw.text((x+i, y+j), text, fill=outline)
-            # رسم النص الرئيسي مرتين
-            draw.text((x, y), text, fill=color)
-            draw.text((x+1, y+1), text, fill=color)
+            # رسم النص الأساسي بطبقات متعددة لزيادة الحجم والوضوح
+            for offset in [0, 0.5, 1]:
+                draw.text((x+offset, y), text, fill=color)
 
-        draw_huge_text((260, 60), f"NAME: {name.upper()}", text_color)
-        draw_huge_text((260, 135), f"LEVEL: {level}", text_color)
-        draw_huge_text((260, 210), f"XP: {format_num(xp)}", text_color)
+        # مواقع النصوص الضخمة
+        draw_massive_text((270, 40), f"{name.upper()}", text_color)
+        draw_massive_text((270, 120), f"LEVEL: {level}", text_color)
+        draw_massive_text((270, 200), f"TOTAL XP: {format_num(xp)}", text_color)
         
+        combined = Image.alpha_composite(img, txt_layer)
         buf = BytesIO()
-        img.save(buf, format="PNG")
+        combined.save(buf, format="PNG")
         buf.seek(0)
         return buf
     except Exception as e:
@@ -109,65 +118,64 @@ bot = SkyBot()
 def is_staff(it: discord.Interaction):
     return it.user.id == OWNER_ID or any(r.id in ADMIN_ROLES for r in it.user.roles)
 
-# --- 5. الأوامر ---
-@bot.tree.command(name="rank", description="عرض بطاقتك الصورية")
+# --- 5. الأوامر التفاعلية ---
+@bot.tree.command(name="rank", description="عرض بطاقتك الصورية الضخمة")
 async def rank(it: discord.Interaction, member: discord.Member = None):
     if it.channel_id != ALLOWED_RANK_CH_ID:
-        return await it.response.send_message(f"❌ استخدم <#{ALLOWED_RANK_CH_ID}>", ephemeral=True)
+        return await it.response.send_message(f"❌ استخدم الروم <#{ALLOWED_RANK_CH_ID}>", ephemeral=True)
     
     await it.response.defer()
     target = member or it.user
-    if target.bot: return await it.followup.send("البوتات لا تملك رتباً.")
+    if target.bot: return await it.followup.send("❌ البوتات لا تشارك في النظام.")
     
     u = get_user(target.id)
     card = await generate_card(target.display_name, u['level'], u['xp'], target.display_avatar.url, u['bg'], u['t_color'])
     
     if card:
-        await it.followup.send(file=discord.File(card, "rank.png"))
+        await it.followup.send(file=discord.File(card, f"rank_{target.id}.png"))
     else:
-        await it.followup.send("❌ فشل إنشاء الصورة، جرب مرة أخرى.")
+        await it.followup.send("❌ فشل إنشاء البطاقة، جرب مرة أخرى.")
 
 @bot.tree.command(name="store", description="متجر الخلفيات")
 async def store(it: discord.Interaction):
-    emb = discord.Embed(title="🛒 متجر Sky Data", color=0x9b59b6)
+    emb = discord.Embed(title="🛒 متجر Sky Data", description="شراء الخلفية يغير شكل بطاقة `/rank`", color=0x9b59b6)
     for k, v in STORE_BG.items():
-        emb.add_field(name=f"#{k} {v['name']}", value=f"السعر: `{format_num(v['price'])}` XP", inline=True)
+        emb.add_field(name=f"الرقم: {k}", value=f"**{v['name']}**\nالسعر: `{format_num(v['price'])}` XP", inline=True)
     await it.response.send_message(embed=emb)
 
-@bot.tree.command(name="buy", description="شراء خلفية")
+@bot.tree.command(name="buy", description="شراء مظهر جديد")
 async def buy(it: discord.Interaction, number: str):
-    if number not in STORE_BG: return await it.response.send_message("❌ الرقم غير موجود.")
+    if number not in STORE_BG: return await it.response.send_message("❌ هذا الرقم غير موجود.", ephemeral=True)
     u = get_user(it.user.id)
     item = STORE_BG[number]
-    if u['xp'] < item['price']: return await it.response.send_message("❌ نقاطك لا تكفي!")
+    if u['xp'] < item['price']: return await it.response.send_message("❌ نقاطك لا تكفي!", ephemeral=True)
     
     collection.update_one({"_id": str(it.user.id)}, {"$inc": {"xp": -item['price']}, "$set": {"bg": item['url'], "t_color": item['color']}})
-    await it.response.send_message(f"✅ مبروك! اشتريت **{item['name']}**.")
+    await it.response.send_message(f"✅ مبروك! تم تحديث بطاقتك إلى **{item['name']}**.")
 
-@bot.tree.command(name="top", description="قائمة المتصدرين (البشر فقط)")
+@bot.tree.command(name="top", description="قائمة الأساطير (بدون بوتات)")
 async def top(it: discord.Interaction):
     await it.response.defer()
-    # جلب 50 للتصفية
     all_users = list(collection.find().sort("xp", -1).limit(50))
-    emb = discord.Embed(title="🏆 أساطير Sky Data", color=0xf1c40f)
+    emb = discord.Embed(title="🏆 قائمة أساطير Sky Data", color=0xf1c40f)
     desc = ""
     count = 0
     for u in all_users:
         if count >= 10: break
         m = it.guild.get_member(int(u["_id"]))
-        if m and not m.bot: # منع البوتات من الظهور
+        if m and not m.bot:
             count += 1
             desc += f"**#{count}** | {m.mention} - لفل `{u['level']}` - `{format_num(u['xp'])}` XP\n"
-    emb.description = desc or "لا يوجد بيانات."
+    emb.description = desc
     await it.followup.send(embed=emb)
 
-@bot.tree.command(name="give_xp", description="إضافة XP (للإدارة)")
+@bot.tree.command(name="give_xp", description="منح نقاط لمستخدم (إداري)")
 async def give_xp(it: discord.Interaction, member: discord.Member, amount: int):
-    if not is_staff(it): return await it.response.send_message("❌ صلاحيات غير كافية.")
+    if not is_staff(it): return await it.response.send_message("❌ للادارة فقط.", ephemeral=True)
     collection.update_one({"_id": str(member.id)}, {"$inc": {"xp": amount}}, upsert=True)
-    await it.response.send_message(f"✅ تم إضافة `{amount}` لـ {member.mention}")
+    await it.response.send_message(f"✅ تم إضافة `{amount}` نقطة لـ {member.mention}.")
 
-# --- 6. نظام التفاعل والترقيات ---
+# --- 6. نظام الرسائل والتلقائيات ---
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
@@ -184,7 +192,7 @@ async def on_message(msg):
     
     if new_lvl > u['level']:
         ch = bot.get_channel(UPGRADE_CH_ID)
-        if ch: await ch.send(f"🎊 كفو {msg.author.mention}! وصلت لفل **{new_lvl}**")
+        if ch: await ch.send(f"🎊 {msg.author.mention} مبروك ارتقيت للفل **{new_lvl}**!")
         if new_lvl in LEVEL_ROLES:
             role = msg.guild.get_role(LEVEL_ROLES[new_lvl])
             if role: 
@@ -192,10 +200,10 @@ async def on_message(msg):
                 except: pass
     await bot.process_commands(msg)
 
-# --- 7. التشغيل ---
+# --- 7. استمرارية العمل ---
 app = Flask('')
 @app.route('/')
-def home(): return "Sky Active"
+def home(): return "Sky System 2.0 Active"
 def run(): app.run(host='0.0.0.0', port=8080)
 
 if __name__ == "__main__":
