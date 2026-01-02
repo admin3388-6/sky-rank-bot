@@ -1,5 +1,4 @@
 discord.py
 flask
-flask-cors
-Pillow
-requests
+pymongo
+dnspython
