@@ -2,3 +2,5 @@ discord.py
 flask
 pymongo
 dnspython
+Pillow
+requests
